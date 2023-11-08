@@ -99,6 +99,41 @@ def main(args):
         # distortion
         orig_image_no_w_auged, orig_image_w_auged = image_distortion(orig_image_no_w, orig_image_w, seed, args)
 
+        ### RISE algorithm trial ###
+        def generate_masks(N, s, p1):
+            cell_size = np.ceil(np.array(model.input_size) / s)
+            up_size = (s + 1) * cell_size
+
+            grid = np.random.rand(N, s, s) < p1
+            grid = grid.astype('float32')
+
+            masks = np.empty((N, *model.input_size))
+
+            for i in tqdm(range(N), desc='Generating masks'):
+                 # Random shifts
+                x = np.random.randint(0, cell_size[0])
+                y = np.random.randint(0, cell_size[1])
+                # Linear upsampling and cropping
+            masks[i, :, :] = resize(grid[i], up_size, order=1, mode='reflect',
+                                anti_aliasing=False)[x:x + model.input_size[0], y:y + model.input_size[1]]
+            masks = masks.reshape(-1, *model.input_size, 1)
+            return masks
+        
+        batch_size = 100
+
+        def explain(model, inp, masks):
+            preds = []
+            # Make sure multiplication is being done for correct axes
+            masked = inp * masks
+            for i in tqdm(range(0, N, batch_size), desc='Explaining'):
+                preds.append(model.run_on_batch(masked[i:min(i+batch_size, N)]))
+            preds = np.concatenate(preds)
+            sal = preds.T.dot(masks.reshape(N, -1)).reshape(-1, *model.input_size)
+            sal = sal / N / p1
+            return sal
+        
+        orig_image_no_w_auged, orig_image_w_auged = image_distortion(orig_image_no_w, orig_image_w, seed, args)
+
         # reverse img without watermarking
         reversed_latents_no_w = diffusion.ddim_reverse_sample_loop(
                 model=model,
